@@ -1,0 +1,13 @@
+# First value will be matched anywhere in the user utterance
+# Second is the brightness corresponding to it (0-1)
+
+bright, 1.0
+dim, 0.2
+half ,0.5
+full, 1.0
+partial, 0.5
+complete, 1.0
+fully, 1.0
+completely, 1.0
+totally, 1.0
+dimly, 0.01
