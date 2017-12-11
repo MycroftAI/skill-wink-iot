@@ -1,0 +1,28 @@
+{
+    "name": "WinkIoT",
+    "skillMetadata": {
+        "sections": [
+            {
+                "name": "Account Information",
+                "fields": [
+                    {
+                        "type": "label",
+                        "label": "Your <a href='https://www.wink.com'>Wink</a> hubs will be used to control your home automation equipment.  In order to do this, you must enter your Wink account information below.  Use the Wink app on your smartphone to further configure device names and groups."
+                    },
+                    {
+                        "name": "email",
+                        "type": "email",
+                        "label": "Registered Email",
+                        "value": ""
+                    },
+                    {
+                        "name": "password",
+                        "type": "password",
+                        "label": "Wink Password",
+                        "value": ""
+                    }
+                ]
+            }
+        ]
+    }
+}
