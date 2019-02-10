@@ -158,7 +158,7 @@ class WinkIoTSkill(MycroftSkill):
 
         if not self.settings['email'] or not self.settings['password']:
             self.speak_dialog("need.to.configure")
-            raise Exception("need.to.configure")
+            return False
 
         # Attempt to authorize with the users ID and password
         body = {
@@ -349,17 +349,17 @@ class WinkIoTSkill(MycroftSkill):
         except:
             pass
 
-    @intent_handler(IntentBuilder("").require("Light").require("Brighten").
+    @intent_handler(IntentBuilder("Brighten").require("Light").require("Brighten").
                     optionally("Room"))
-    def handle_dim_light(self, message):
+    def handle_brighten_light(self, message):
         self.scale_lights(message, 1.5)
 
-    @intent_handler(IntentBuilder("").require("Light").require("Dim").
+    @intent_handler(IntentBuilder("Dim").require("Light").require("Dim").
                     optionally("Room"))
     def handle_dim_light(self, message):
         self.scale_lights(message, 0.5)
 
-    @intent_handler(IntentBuilder("").require("Light").
+    @intent_handler(IntentBuilder("ChangeLight").require("Light").
                     optionally("Switch").require("OnOff").optionally("Room"))
     def handle_change_light(self, message):
         try:

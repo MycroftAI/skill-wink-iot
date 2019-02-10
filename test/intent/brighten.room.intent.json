@@ -1,0 +1,9 @@
+{
+  "utterance": "brighten the lights in the bedroom",
+  "intent_type": "Brighten",
+  "intent": {
+    "Brighten": "brighten",
+    "Light": "lights",
+    "Room": "bedroom"
+  }
+}
