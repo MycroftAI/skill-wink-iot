@@ -1,0 +1,8 @@
+{
+  "utterance": "turn on the lights",
+  "intent_type": "ChangeLight",
+  "intent": {
+    "OnOff": "on",
+    "Light": "lights"
+  }
+}

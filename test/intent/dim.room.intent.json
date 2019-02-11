@@ -1,0 +1,9 @@
+{
+  "utterance": "dim the lights in the kitchen",
+  "intent_type": "Dim",
+  "intent": {
+    "Dim": "dim",
+    "Light": "lights",
+    "Room": "kitchen"
+  }
+}
