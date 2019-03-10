@@ -24,6 +24,15 @@ from mycroft.util.log import getLogger
 LOG = getLogger(__name__)
 
 
+def cache(func):
+    func.cached_result = None
+    def new_func(self, use_cache=True):
+        if not use_cache or not func.cached_result:
+            func.cached_result = func(self)
+        return func.cached_result
+    return new_func
+
+
 # TODO: Move the mycroft.util.parse
 def contains_word(sentence, word):
     import re
@@ -98,13 +107,8 @@ class WinkIoTSkill(CommonIoTSkill):
         return self._intensities.keys()
 
     def _initialize_entities(self):
-        groups = self.wink_groups.get("data")
-        devices = self.wink_devices.get("data")
-        LOG.info("Wink group data = " + str(groups))
-        LOG.info("Wink dev data = " + str(devices))
-        LOG.info("Raw group data = " + str(self.wink_groups))
-        LOG.info("Raw dev data = " + str(self.wink_devices))
-
+        groups = self.wink_groups().get("data")
+        devices = self.wink_devices().get("data")
         groups = {group["name"]: [member["object_id"]
                   for member in group["members"]
                       if member["object_type"] == "light_bulb"]
@@ -112,7 +116,6 @@ class WinkIoTSkill(CommonIoTSkill):
         lights = {dev["name"]: [dev["object_id"]]
                   for dev in devices if self._is_light(dev)}
         lights.update(groups)  # Groups take precedence
-        LOG.info("entities are " + str(lights))
         self._entities = lights
 
     def debug(self, message, level=1, char=None):
@@ -223,19 +226,17 @@ class WinkIoTSkill(CommonIoTSkill):
             self.debug(res.text, 5)
             return None
 
-    @property
+    @cache
     def wink_devices(self):
         # Retrieve a list of devices associated with the account
-        if not self._device_cache:
-            self._device_cache = self._winkapi_get("/users/me/wink_devices")
-        return self._device_cache
+        devices = self._winkapi_get("/users/me/wink_devices")
+        LOG.info("devices are: " + str(type(devices)) + " " + str(devices))
+        return devices
 
-    @property
+    @cache
     def wink_groups(self):
         # Retrieve a list of groups of devices associated with the account
-        if not self._group_cache:
-            self._group_cache = self._winkapi_get("/users/me/groups")
-        return self._group_cache
+        return self._winkapi_get("/users/me/groups")
 
     def _is_light(self, dev):
         return "light_buld_id" in dev
@@ -249,8 +250,8 @@ class WinkIoTSkill(CommonIoTSkill):
         # First fuzzy search the groups
         best = None
         best_score = 0
-        if self.wink_groups:
-            for group in self.wink_groups["data"]:
+        if self.wink_groups():
+            for group in self.wink_groups()["data"]:
                 groupname = normalize(group["name"])
                 score = fuzzy_match(groupname, name)
                 self.debug(groupname + " : " + str(score), 5)
@@ -258,7 +259,7 @@ class WinkIoTSkill(CommonIoTSkill):
                     best_score = score
                     best = group
 
-        if not self.wink_devices:
+        if not self.wink_devices():
             # can't even return group matches without device info
             return None
 
@@ -272,7 +273,7 @@ class WinkIoTSkill(CommonIoTSkill):
                     group_IDs.append(member["object_id"])
 
         best = None
-        for dev in self.wink_devices["data"]:
+        for dev in self.wink_devices()["data"]:
             if "light_bulb_id" in dev:   # check if light_bulb
 
                 # Gather group lights (just in case the group wins)
@@ -337,19 +338,21 @@ class WinkIoTSkill(CommonIoTSkill):
 
     def scale_lights(self, requst: IoTRequest, scale_by: float):
         try:
-            room = requst.entity or self.room_name
-
-            self._device_cache = None  # force update of states TODO what does this do?
-            lights = self._entities[room]
+            entity = requst.entity or self.room_name
+            LOG.info("room is " + entity)
+            light_ids = self._entities.get(entity)
+            lights = [dev for dev in self.wink_devices(use_cache=False)["data"]
+                      if dev.get("light_bulb_id") in light_ids]
             if lights:
                 brightness = lights[0]["last_reading"]["brightness"] * scale_by
-                self.set_light(lights, True, brightness)
+                self.set_light(entity, Action.ON, brightness)
             else:
                 self.speak_dialog("couldnt.find.light")
-        except:
-            pass
+        except Exception as e:
+            LOG.exception(e)
 
     def can_handle(self, request: IoTRequest):
+        LOG.info(str(request))
         if not (request.thing == Thing.LIGHT
                 or request.entity in self._entities):
             return False, None
@@ -370,6 +373,7 @@ class WinkIoTSkill(CommonIoTSkill):
                 intensity = self._intensities[request.scene]
             self.set_light(request.entity, request.action, intensity)
         if request.action == Action.INCREASE:
+            LOG.info("Scaling lights up")
             self.scale_lights(request, 1.5)
         if request.action == Action.DECREASE:
             self.scale_lights(request, 0.5)
