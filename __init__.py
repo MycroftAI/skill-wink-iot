@@ -14,10 +14,14 @@ import requests
 import json
 import datetime
 
-from adapt.intent import IntentBuilder
-from mycroft.skills.core import MycroftSkill, intent_handler
 from mycroft.api import DeviceApi
 from mycroft.util.parse import normalize
+from mycroft.skills.common_iot_skill import CommonIoTSkill
+from mycroft.skills.common_iot_skill import IoTRequest, Action, Attribute, Thing
+from mycroft.util.log import getLogger
+
+
+LOG = getLogger(__name__)
 
 
 # TODO: Move the mycroft.util.parse
@@ -64,7 +68,7 @@ client_id = 'quirky_wink_ios_app'
 client_secret = 'ce609edf5e85015d393e7859a38056fe'
 
 
-class WinkIoTSkill(MycroftSkill):
+class WinkIoTSkill(CommonIoTSkill):
     debug_level = 3  # 0-10, 10 showing the most debugging info
 
     def __init__(self):
@@ -78,6 +82,38 @@ class WinkIoTSkill(MycroftSkill):
         self._device_cache = None
         self._group_cache = None
         self._active_room = None
+        self._entities = dict()
+        self._intensities = dict()
+
+    def initialize(self):
+        self._initialize_entities()
+        self._intensities = self.translate_namedvalues("Intensities")
+        self.register_entities_and_scenes()
+
+    def get_entities(self):
+        return self._entities.keys()
+
+    def get_scenes(self):
+        LOG.info("intensities: " + str(self._intensities))
+        return self._intensities.keys()
+
+    def _initialize_entities(self):
+        groups = self.wink_groups.get("data")
+        devices = self.wink_devices.get("data")
+        LOG.info("Wink group data = " + str(groups))
+        LOG.info("Wink dev data = " + str(devices))
+        LOG.info("Raw group data = " + str(self.wink_groups))
+        LOG.info("Raw dev data = " + str(self.wink_devices))
+
+        groups = {group["name"]: [member["object_id"]
+                  for member in group["members"]
+                      if member["object_type"] == "light_bulb"]
+                  for group in groups}
+        lights = {dev["name"]: [dev["object_id"]]
+                  for dev in devices if self._is_light(dev)}
+        lights.update(groups)  # Groups take precedence
+        LOG.info("entities are " + str(lights))
+        self._entities = lights
 
     def debug(self, message, level=1, char=None):
         # Debugging assistance.
@@ -90,46 +126,6 @@ class WinkIoTSkill(MycroftSkill):
         if not char:
             char = "-"
         self.log.debug(char*(10-level) + " " + message)
-
-    # TODO: Move in to MycroftSkill
-    def translate_namedvalues(self, name, delim=None):
-        """
-        Load translation dict containing names and values.
-
-        This loads a simple CSV from the 'dialog' folders.
-        The name is the first list item, the value is the
-        second.  Lines prefixed with # or // get ignored
-
-        Args:
-            name (str): name of the .value file, no extension needed
-            delim (char): delimiter character used, default is ','
-
-        Returns:
-            dict: name and value dictionary, or [] if load fails
-        """
-        import csv
-        from os.path import join
-
-        delim = delim or ','
-        result = {}
-        if not name.endswith(".value"):
-            name += ".value"
-
-        try:
-            with open(join(self.root_dir, 'dialog', self.lang, name)) as f:
-                reader = csv.reader(f, delimiter=delim)
-                for row in reader:
-                    # skip comment lines
-                    if not row or row[0].startswith("#"):
-                        continue
-                    if len(row) != 2:
-                        continue
-
-                    result[row[0]] = row[1]
-
-            return result
-        except:
-            return {}
 
     def get_remainder(self, message):
         # Remove words "consumed" by the intent match, e.g. if they
@@ -241,6 +237,9 @@ class WinkIoTSkill(MycroftSkill):
             self._group_cache = self._winkapi_get("/users/me/groups")
         return self._group_cache
 
+    def _is_light(self, dev):
+        return "light_buld_id" in dev
+
     def get_lights(self, search_name):
         if not search_name:
             return None
@@ -296,19 +295,21 @@ class WinkIoTSkill(MycroftSkill):
 
         return None
 
-    def set_light(self, lights, state, brightness=1.0):
-        self.debug("Setting lights: "+str(state)+"@"+str(brightness), 1, "=")
+    def set_light(self, entity: str, action: Action, brightness=1.0):
+        lights = (self._entities.get(entity) or
+                  self._entities.get(self.room_name))
+        powered = action == Action.ON
+        self.debug("Setting lights: " + str(powered) +
+                   "@" + str(brightness), 1, "=")
         if not lights:
             return False
 
         for light in lights:
-            self.debug("Light: "+light["name"]+":"+light["light_bulb_id"], 5)
             body = {"desired_state": {
-                       "powered": state,
+                       "powered": powered,
                        "brightness": brightness
                    }}
-            self._winkapi_put("/light_bulbs/"+light["light_bulb_id"],
-                              body)
+            self._winkapi_put("/light_bulbs/" + light, body)
         return True
 
     def find_lights(self, remainder, room):
@@ -334,13 +335,12 @@ class WinkIoTSkill(MycroftSkill):
 
         return lights
 
-    def scale_lights(self, message, scale_by):
+    def scale_lights(self, requst: IoTRequest, scale_by: float):
         try:
-            remainder = self.get_remainder(message)
-            room = message.data.get("Room")
+            room = requst.entity or self.room_name
 
-            self._device_cache = None  # force update of states
-            lights = self.find_lights(remainder, room)
+            self._device_cache = None  # force update of states TODO what does this do?
+            lights = self._entities[room]
             if lights:
                 brightness = lights[0]["last_reading"]["brightness"] * scale_by
                 self.set_light(lights, True, brightness)
@@ -349,68 +349,67 @@ class WinkIoTSkill(MycroftSkill):
         except:
             pass
 
-    @intent_handler(IntentBuilder("Brighten").require("Light").require("Brighten").
-                    optionally("Room"))
-    def handle_brighten_light(self, message):
-        self.scale_lights(message, 1.5)
+    def can_handle(self, request: IoTRequest):
+        if not (request.thing == Thing.LIGHT
+                or request.entity in self._entities):
+            return False, None
+        if request.scene and request.scene not in self._intensities:
+            return False, None
+        if request.attribute and not request.attribute == Attribute.BRIGHTNESS:
+            return False, None
+        if request.action in (Action.ON, Action.OFF):
+            return True, None
+        elif request.action in (Action.INCREASE, Action.DECREASE):
+            return True, None
+        return False, None
 
-    @intent_handler(IntentBuilder("Dim").require("Light").require("Dim").
-                    optionally("Room"))
-    def handle_dim_light(self, message):
-        self.scale_lights(message, 0.5)
+    def run_request(self, request: IoTRequest, callback_data: dict):
+        if request.action in (Action.ON, Action.OFF):
+            intensity = 1.0
+            if request.scene:
+                intensity = self._intensities[request.scene]
+            self.set_light(request.entity, request.action, intensity)
+        if request.action == Action.INCREASE:
+            self.scale_lights(request, 1.5)
+        if request.action == Action.DECREASE:
+            self.scale_lights(request, 0.5)
 
-    @intent_handler(IntentBuilder("ChangeLight").require("Light").
-                    optionally("Switch").require("OnOff").optionally("Room"))
-    def handle_change_light(self, message):
-        try:
-            on_off = message.data.get("OnOff")
-            switch = message.data.get("Switch", "")
-            room = message.data.get("Room")
-            remainder = self.get_remainder(message)
 
-            lights = self.find_lights(remainder, room)
-            if lights:
-                # Allow user to say "half", "full", "dim", etc.
-                brightness = 1.0
-                intensities = self.translate_namedvalues("Intensities")
-                for i in intensities:
-                    if contains_word(message.data.get("utterance"), i):
-                        self.debug("Match intensity: "+i)
-                        brightness = intensities[i]
 
-                self.set_light(lights, on_off != "off", brightness)
-            else:
-                self.speak_dialog("couldnt.find.light")
-        except:
-            pass
-
-    # Disabling for now.  "What is your name" is triggering this intent
-    # Might need Padatious to handle this?
+    # @intent_handler(IntentBuilder("Brighten").require("Light").require("Brighten").
+    #                 optionally("Room"))
+    # def handle_brighten_light(self, message):
+    #     self.scale_lights(message, 1.5)
     #
-    # @intent_handler(IntentBuilder("").optionally("Light").
-    #                 require("Query").optionally("Room"))
-    def handle_query_light(self, message):
-        try:
-            remainder = self.get_remainder(message)
-
-            self._device_cache = None  # force update of states
-            lights = self.find_lights(remainder,
-                                      message.data.get("Room"))
-            if lights:
-                # Just give the value of the first light
-                if (not lights[0]["last_reading"]["powered"] or
-                        lights[0]["last_reading"]["brightness"] < 0.001):
-                    state = self.translate("off")
-                elif lights[0]["last_reading"]["brightness"] < 0.75:
-                    state = self.translate("dimmed")
-                else:
-                    state = self.translate("on")
-
-                self.speak_dialog("light.level.is", data={"state": state})
-            else:
-                self.speak_dialog("couldnt.find.light")
-        except:
-            pass
+    # @intent_handler(IntentBuilder("Dim").require("Light").require("Dim").
+    #                 optionally("Room"))
+    # def handle_dim_light(self, message):
+    #     self.scale_lights(message, 0.5)
+    #
+    # @intent_handler(IntentBuilder("ChangeLight").require("Light").
+    #                 optionally("Switch").require("OnOff").optionally("Room"))
+    # def handle_change_light(self, message):
+    #     try:
+    #         on_off = message.data.get("OnOff")
+    #         switch = message.data.get("Switch", "")
+    #         room = message.data.get("Room")
+    #         remainder = self.get_remainder(message)
+    #
+    #         lights = self.find_lights(remainder, room)
+    #         if lights:
+    #             # Allow user to say "half", "full", "dim", etc.
+    #             brightness = 1.0
+    #             intensities = self.translate_namedvalues("Intensities")
+    #             for i in intensities:
+    #                 if contains_word(message.data.get("utterance"), i):
+    #                     self.debug("Match intensity: "+i)
+    #                     brightness = intensities[i]
+    #
+    #             self.set_light(lights, on_off != "off", brightness)
+    #         else:
+    #             self.speak_dialog("couldnt.find.light")
+    #     except:
+    #         pass
 
     def converse(self, utterances, lang='en-us'):
         if self._active_room:
