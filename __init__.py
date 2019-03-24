@@ -211,9 +211,9 @@ class WinkIoTSkill(CommonIoTSkill):
 
     @overrides(CommonIoTSkill)
     def can_handle(self, request: IoTRequest):
-        if not request.thing == Thing.LIGHT:
+        if request.thing and request.thing != Thing.LIGHT:
             return False, None
-        if request.entity not in self._entities:
+        if request.entity and request.entity not in self._entities:
             return False, None
         if request.scene and request.scene not in self._intensities:
             return False, None
