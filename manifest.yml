@@ -1,0 +1,8 @@
+dependencies:
+  # Pip dependencies on PyPI
+  python:
+    - requests
+
+  # Require the installation of other skills before installing this skill
+  skills:
+    - skill-iot-control
