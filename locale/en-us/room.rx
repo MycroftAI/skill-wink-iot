@@ -1,1 +1,1 @@
-(at|in|on|by) (?P<Room>.*)
+(at|in|on|by) (the|) (?P<Room>.*)
