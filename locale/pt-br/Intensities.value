@@ -1,0 +1,12 @@
+# O primeiro valor terá correspondência em qualquer lugar na frase dita pelo usuário
+# O segundo valor é o brilho correspondente (de 0 a 1) 
+brilhante, 1.0
+tênue, 0.2
+metade, 0.5
+cheio, 1.0
+parcial, 0.5
+completo, 1.0
+plenamente, 1.0
+completamente, 1.0
+totalmente, 1.0
+fracamente, 0.01
